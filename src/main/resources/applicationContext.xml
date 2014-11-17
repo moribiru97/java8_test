@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:aop="http://www.springframework.org/schema/aop"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:p="http://www.springframework.org/schema/p"
+	xmlns:tx="http://www.springframework.org/schema/tx"
+	xmlns:task="http://www.springframework.org/schema/task"
+	xmlns:mvc="http://www.springframework.org/schema/mvc"
+	xmlns:util="http://www.springframework.org/schema/util"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans 
+						http://www.springframework.org/schema/beans/spring-beans.xsd
+						http://www.springframework.org/schema/aop 
+						http://www.springframework.org/schema/aop/spring-aop-4.0.xsd
+						http://www.springframework.org/schema/context 
+						http://www.springframework.org/schema/context/spring-context.xsd
+						http://www.springframework.org/schema/tx 
+						http://www.springframework.org/schema/tx/spring-tx-4.0.xsd
+						http://www.springframework.org/schema/mvc 
+						http://www.springframework.org/schema/mvc/spring-mvc-4.0.xsd
+						http://www.springframework.org/schema/util
+						http://www.springframework.org/schema/util/spring-util-4.0.xsd
+						http://www.springframework.org/schema/task
+						http://www.springframework.org/schema/task/spring-task-4.0.xsd">
+
+	<context:annotation-config />
+	<context:component-scan base-package="com.nhn_playart.smoothie" />
+
+	<aop:aspectj-autoproxy />
+	<tx:annotation-driven />
+	<import resource="applicationContext-cache.xml"/>
+	<import resource="applicationContext-mongodb.xml"/>
+	
+	<util:properties id="sentinel" location="classpath:/core/redis-sentinel.properties" />
+
+	<bean class="com.nhn_playart.smoothie.core.mvc.MVCConfigurationPostProcessor">
+		<property name="webBindingInitializer">
+			<bean class="com.nhn_playart.smoothie.deploy.mvc.DefaultWebBindingInitializer" />
+		</property>
+	</bean>
+	
+	<mvc:interceptors>
+		<bean class="com.nhn_playart.smoothie.core.mvc.MVCInterceptor" />
+		<ref bean="authCookieInterceptor"/>
+		<mvc:interceptor>
+			<mvc:mapping path="/**"/>
+			<mvc:exclude-mapping path="/ws"/>
+			<ref bean="operationLogInterceptor"/>
+		</mvc:interceptor>
+	</mvc:interceptors>
+
+	<mvc:annotation-driven>
+		<mvc:message-converters register-defaults="true">
+			<bean class="org.springframework.http.converter.StringHttpMessageConverter">
+				<property name="supportedMediaTypes" value="text/plain;charset=UTF-8" />
+				<property name="writeAcceptCharset" value="false" />
+			</bean>
+		</mvc:message-converters>
+		<mvc:return-value-handlers>
+			<bean class="com.nhn_playart.smoothie.core.mvc.ListenableFutureReturnValueHandler" />
+		</mvc:return-value-handlers>
+	</mvc:annotation-driven>
+	
+	<bean id="objectMapper" class="com.fasterxml.jackson.databind.ObjectMapper" />
+	<bean id="properties" class="org.springframework.beans.factory.config.PropertiesFactoryBean">
+	   <property name="locations">
+	       <list>
+	           <value>classpath:scripts.properties</value>
+	           <value>classpath:application.properties</value>
+	       </list>
+	   </property>
+	</bean>
+	
+	<!-- For Encrypt Properties Module -->
+	<bean class="com.nhn_playart.smoothie.core.util.EncryptPropertyPlaceholderConfigurer">
+		<property name="locations">
+			<list>
+				<value>classpath:application.properties</value>
+			</list>
+		</property>
+		<property name="encryptPrefix" value="Encrypted:" />
+		<property name="encryptor" ref="encryptor" />
+	</bean>
+	<bean id="encryptor" class="com.nhn_playart.smoothie.core.util.DefaultEncryptor">
+		<constructor-arg name="key" value="F6ehHr4wcZ9PjwijFJxCIA==" />
+		<constructor-arg name="encode" value="UTF-8" />
+	</bean>
+
+	<!-- Database -->
+	<bean id="dataSource" class="com.jolbox.bonecp.BoneCPDataSource" destroy-method="close">
+		<property name="driverClass" value="${fw.db.driver}" />
+		<property name="jdbcUrl" value="${fw.db.url}" />
+		<property name="username" value="${fw.db.username}"/>
+		<property name="password" value="${fw.db.password}"/>
+		<property name="maxConnectionsPerPartition" value="${fw.db.connection.max}"/>
+		<property name="minConnectionsPerPartition" value="${fw.db.connection.min}"/>
+		<property name="partitionCount" value="1"/>
+		<property name="idleMaxAgeInMinutes" value="10"/>
+		<property name="acquireIncrement" value="1"/>
+		<property name="statementsCacheSize" value="100"/>
+		<property name="defaultAutoCommit" value="false" />
+	</bean>
+	<bean id="transactionManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+		<property name="dataSource" ref="dataSource"/>
+	</bean>
+	<bean id="connectionProvider" class="com.nhn_playart.smoothie.core.db.DefaultConnectionProvider">
+		<property name="dataSource" ref="dataSource" />
+	</bean>
+	<bean id="sqlManager" class="com.nhn_playart.smoothie.deploy.dao.AdminSqlManager">
+		<property name="connectionProvider" ref="connectionProvider" />
+		<property name="dialect" ref="dialect" />
+	</bean>
+	<bean id="dialect" class="jp.sf.amateras.mirage.dialect.MySQLDialect"/>
+	
+	<bean id="mailSender" class="org.springframework.mail.javamail.JavaMailSenderImpl">
+		<property name="host" value="${fw.mail.smtp.host}"/>
+		<property name="port" value="${fw.mail.smtp.port}"/>
+	</bean>
+	
+	<bean id="velocityEngine" class="org.springframework.ui.velocity.VelocityEngineFactoryBean">
+		<property name="resourceLoaderPath" value="classpath:view/mail" />
+		<property name="velocityPropertiesMap">
+			<map>
+				<entry key="input.encoding" value="UTF-8" />
+				<entry key="output.encoding" value="UTF-8" />
+			</map>
+		</property>
+    </bean>
+	
+	<bean id="templateResolver" class="org.thymeleaf.templateresolver.ClassLoaderTemplateResolver">
+		<property name="prefix" value="view/template/" />
+		<property name="suffix" value=".html" />
+		<property name="templateMode" value="LEGACYHTML5" />
+		<property name="characterEncoding" value="UTF-8" />
+	</bean>
+	<bean class="org.thymeleaf.spring4.view.ThymeleafViewResolver">
+		<property name="templateEngine">
+			<bean class="org.thymeleaf.spring4.SpringTemplateEngine">
+				<property name="templateResolver" ref="templateResolver" />
+			</bean>
+		</property>
+		<property name="order" value="1" />
+		<property name="characterEncoding" value="UTF-8" />
+	</bean>
+
+	<!-- Spring JMX config --> 
+	<bean id="mbeanServer" class="org.springframework.jmx.support.MBeanServerFactoryBean">
+		<property name="locateExistingServerIfPossible" value="true" />
+	</bean>
+	 
+	<!--  
+	     Export the Atomikos JMX transaction service  
+	     to the local JMX service in the running VM (1.5 or higher)  
+	--> 
+	<bean id="exporter" class="org.springframework.jmx.export.MBeanExporter"> 
+	        <property name="beans"> 
+	            <map> 
+	                <entry key="test:type=transactionManager"> 
+	                    <ref bean="transactionManager"/> 
+	                </entry> 
+	            </map> 
+	        </property> 
+	        <property name="server"> 
+	            <ref bean="mbeanServer"/> 
+	        </property> 
+	</bean>
+</beans>
